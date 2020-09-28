@@ -1,0 +1,72 @@
+---
+
+- name: Abort Play when IP is in use
+  command: ping -c1 {{ ansible_ssh_host }}
+  delegate_to: localhost
+  register: ping_result
+  failed_when: >
+    ("" not in ping_result.stderr)
+  changed_when: False
+  
+- meta: end_play
+  when: ping_result.rc==0
+
+
+- name:
+  debug:
+    msg: " IP Address {{ ansible_ssh_host }} is free"
+    verbosity: 3
+  when: ping_result.rc==1
+
+- name: Creat a new VM
+  block:
+    - set_fact:
+        disk_size: "{{ vmDisk }}"
+        memory: "{{ vmMemory }}"
+        cpu: "{{ vmCPUs }}"
+      
+    - vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_user }}"
+        password: "{{ vcenter_pass }}"
+        datacenter: "{{ vcenter_datacenter }}"
+        name: "{{ hostname }}"
+        template: "{{ vcenter_vmtemplate }}"
+        resource_pool: "{{ vcenter_resource_pool | default(omit) }}"
+        cluster: "{{ vcenter_cluster }}"
+        state: poweredon
+        folder: "{{ vcenter_folder_full }}"
+        validate_certs: False
+        is_template: no
+        disk:
+          - size_gb: "{{ disk_size }}"
+            type: thin
+            datastore: "{{ vcenter_datastore }}"
+        hardware:
+          memory_mb: "{{ memory }}"
+          num_cpus: "{{ cpu }}"
+        networks:
+         - name: "{{ vlan }}"
+           ip: "{{ ansible_ssh_host }}"
+           netmask: "{{ netmask }}"
+           gateway: "{{ gateway }}"
+        customization:
+          dns_servers:
+          - "{{ dns[0] }}"
+          - "{{ dns[1] }}"
+        wait_for_ip_address: yes
+      register: new_vm
+      delegate_to: localhost
+      failed_when: >
+        (new_vm.failed==true)
+  rescue:
+    - debug:
+        msg: " VM {{ hostname }} already Exists"
+        verbosity: 3
+    - meta: end_play
+
+   
+
+- name: New VM Status Message
+  debug:
+    msg: " New VM {{ hostname }}, {{ ansible_ssh_host }}, is Up and Running"
